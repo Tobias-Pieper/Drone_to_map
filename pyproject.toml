@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "farm-mapping"
+version = "0.1.0"
+description = "Offline orthomosaic review and georeferenced polygon editing"
+requires-python = ">=3.12"
+dependencies = ["rasterio>=1.4,<2", "pyproj>=3.7,<4", "shapely>=2.1,<3", "numpy>=2,<3", "Pillow>=11,<13", "nicegui>=3,<4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+farm-mapping = "farm_mapping.app:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
