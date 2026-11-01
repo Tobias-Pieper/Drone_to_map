@@ -1,0 +1,3 @@
+map_id,farm,flight_date,drone_model,drone_class,flight_altitude_m,front_overlap_pct,side_overlap_pct,flight_speed_mps,gcp_count,image_count,flight_duration_min,processing_software,processing_duration_min,gsd_cm,weather,notes
+F1-RTK-40m,HSWT-F1,2026-11-03,DJI Mavic 3 Enterprise RTK,rtk,40,80,70,5,0,312,19,WebODM 2.x,48,1.1,"overcast, light wind",EXAMPLE - replace with real data
+F1-CONS-40m,HSWT-F1,2026-11-03,DJI Mini 4 Pro,consumer,40,80,70,5,0,298,21,WebODM 2.x,45,1.4,"overcast, light wind",EXAMPLE - replace with real data

@@ -14,6 +14,7 @@ dev = ["pytest>=8,<10"]
 
 [project.scripts]
 farm-mapping = "farm_mapping.app:main"
+farm-accuracy = "farm_mapping.accuracy:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

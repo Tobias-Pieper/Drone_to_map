@@ -1,0 +1,9 @@
+point_id,farm,easting,northing,height,crs,role,structure_type,fix_quality,h_precision_m,survey_date,notes
+CP01,HSWT-F1,702848.943,5364717.905,448.151,EPSG:25832,check,fence_post,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+CP02,HSWT-F1,702885.935,5364720.215,447.866,EPSG:25832,check,building_corner,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+CP03,HSWT-F1,702924.348,5364720.045,447.537,EPSG:25832,check,bed_edge,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+CP04,HSWT-F1,702965.102,5364717.419,447.591,EPSG:25832,check,path_edge,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+CP05,HSWT-F1,702849.547,5364783.161,447.624,EPSG:25832,check,charging_station,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+CP06,HSWT-F1,702886.839,5364781.965,448.448,EPSG:25832,check,field_corner,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+GCP01,HSWT-F1,702927.463,5364780.580,448.476,EPSG:25832,gcp,ground_marker,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data
+GCP02,HSWT-F1,702962.779,5364783.351,447.790,EPSG:25832,gcp,ground_marker,rtk_fixed,0.012,2026-11-03,EXAMPLE - replace with real data

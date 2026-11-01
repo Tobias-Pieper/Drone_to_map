@@ -55,6 +55,9 @@ class Project:
     raster: dict
     features: list = field(default_factory=list)
     safety_distances: dict = field(default_factory=lambda: {'water': 1.0, 'tree': 0.0})
+    flight: dict = field(default_factory=dict)
+    reference_points: list = field(default_factory=list)
+    measurements: dict = field(default_factory=dict)
     approved: bool = False
     revision: int = 0
     schema_version: int = 1

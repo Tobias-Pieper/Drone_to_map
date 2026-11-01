@@ -105,3 +105,49 @@ Der aktuelle Ausgangsstand ist in [CHANGELOG.md](CHANGELOG.md) beschrieben.
 kleine Entwicklungs-Commits, Branches und das Rückgängigmachen mit `git revert`.
 TIFFs und bearbeitete Kartenprojekte sind von Git ausgeschlossen und müssen
 separat gesichert werden.
+
+## Hochladen, volle Auflösung und Genauigkeitsauswertung
+
+GeoTIFFs und Projekte lassen sich direkt in der Oberfläche hochladen
+(Ordner `data/` bzw. `workspace/`) und über „Bereits hochgeladene Datei öffnen“
+wieder öffnen. Ab der Zoomstufe, in der die 1600-Pixel-Vorschau gröber als die
+Kachel wird, lädt die Karte 256-Pixel-Kacheln direkt aus dem Original-GeoTIFF
+(`farm_mapping.tiles`); damit sind 1–2 cm Bodenauflösung sichtbar.
+
+Unter „Flugdaten für die Genauigkeitsauswertung“ werden Drohne, Flughöhe,
+Überlappung, GCP-Anzahl, Zeiten usw. im Projekt gespeichert
+(`farm_mapping.metadata`) und als CSV-Zeile exportiert.
+
+`farm-accuracy` vergleicht in den Karten gemessene Punkte mit RTK-Referenzpunkten
+und schreibt Fehler je Punkt sowie RMSE, P95 und Anteil ≤ 10/15 cm je Karte,
+Drohnenklasse, Flughöhe, GCP-Anzahl, Hof und Strukturtyp. GCPs werden
+standardmäßig ausgeschlossen; konstante Verschiebungen (z. B. ETRS89/WGS84)
+erscheinen als Bias. Vorlagen mit Beispieldaten und Feldanleitung: `templates/`.
+
+```bash
+farm-accuracy templates/reference_points.csv templates/measured_points.csv templates/flight_log.csv --out results
+```
+
+Unter „Kontrollpunkte messen“ wird `reference_points.csv` hochgeladen; die
+Punkte des Hofs werden im Projekt gespeichert. Im Messmodus setzt ein Klick in
+die Karte (nur bei voller Zoomstufe) die Position des gewählten Punkts; die
+Messung wird im Projekt gespeichert und als `measured_points.csv`-Zeilen
+exportiert. Fehler und RMSE erscheinen erst, wenn „Fehler anzeigen“
+eingeschaltet wird. Identische Uploads werden nicht doppelt gespeichert.
+
+Übungsdaten ohne echte Befliegung:
+
+```bash
+python examples/accuracy_demo.py
+```
+
+Erzeugt in `workspace/accuracy_demo/` ein 2-cm-Feldbild mit 9 Kontrollpunkten
+und 2 GCPs (Schachbrettziele), die passenden `reference_points.csv` und
+`flight_log.csv` sowie einen Lösungsschlüssel. Die Karte ist absichtlich um
+einige Zentimeter verschoben; wer die Zielmitten genau trifft, erhält wie der
+Lösungsschlüssel etwa 3,4 cm RMSE.
+
+Prüfstand: 36 Tests bestanden. Kachelschärfe, Flugdatenformular, Kontrollpunkt-
+messung und Speichern im Browser geprüft (macOS, synthetisches 1,5-cm-Bild:
+Klick auf die Zielmitte ergibt 0,3–0,9 cm Fehler; App und `farm-accuracy`
+liefern dieselben Werte). Mit echten Orthomosaiken noch nicht geprüft.
