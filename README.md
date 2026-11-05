@@ -41,7 +41,7 @@ Abstandseinstellungen je Unterkategorie, separater Sperrzonen-GeoJSON-Export, En
 Gesamtkartenfreigabe und deren Invalidierung bei Bearbeitung.
 
 **Dies ist noch nicht der vollständige nutzbare Prototyp.** Ausstehend:
-automatische klassische/KI-Erkennung,
+vortrainierte KI-Erkennung und empirischer Modellvergleich,
 Teilbereichsanalyse, Ableitung konfliktfreier Navigationsflächen,
 PNG/JPG-Kartenexport, Evaluation und reale Datenvalidierung.
 Sperrzonen erscheinen violett und bleiben von Originalpolygonen getrennt.
@@ -105,3 +105,95 @@ Der aktuelle Ausgangsstand ist in [CHANGELOG.md](CHANGELOG.md) beschrieben.
 kleine Entwicklungs-Commits, Branches und das Rückgängigmachen mit `git revert`.
 TIFFs und bearbeitete Kartenprojekte sind von Git ausgeschlossen und müssen
 separat gesichert werden.
+
+## Automatische Polygonvorschläge
+
+Nach dem Laden unter der Karte „Ganze Karte analysieren“ anklicken. Die neue
+experimentelle klassische RGB-Baseline erzeugt eine türkis gestrichelte Vorschau.
+„Vorschläge übernehmen“ ergänzt Entwürfe um bestehende Polygone herum; „Vorschau
+verwerfen“ entfernt sie. Übernommene Vorschläge prüfen und das Projekt speichern.
+Undo nimmt die gesamte Übernahme zurück. Keine neuen Abhängigkeiten erforderlich.
+
+Dies ist noch kein vortrainiertes KI-Modell und noch keine validierte semantische
+Erkennung. Alle Vorschläge erhalten Befahrbarkeit „unbekannt“ und einen Prüfhinweis.
+Mindestfläche: 4 m², längste Analyseseite: 1600 Pixel, höchstens 300 Polygone.
+Schmale/kleine Hindernisse und Klassen können fehlen. Übersicht und Grenzen:
+[Erkennungspipeline](docs/detection.md).
+
+### Zusammenhängende Obstflächen
+
+Die aktuelle Strukturheuristik sucht regelmäßige Baumkronen-Anordnungen in zwei
+Richtungen und schlägt die gesamte Anlage einschließlich Zwischenräumen als
+Arbeitsfläche `orchard` vor. Einzelbäume, Hecken und unstrukturierte Gehölze bleiben
+Hinderniskandidaten. Die Checkbox für Obstflächen und „Fragmente verbinden (m)“
+steuern diese experimentelle Zusammenfassung. Kein KI-Modell und keine
+Befahrbarkeitsgarantie; Konturen und Kategorien weiterhin prüfen.
+
+Zum Vergleich das GeoTIFF neu öffnen und ein separates Projekt speichern, damit
+bereits manuell gezeichnete Referenzbereiche die neue Erkennung nicht überdecken.
+
+### Weniger kleine Teilflächen
+
+Die Erkennung `rgb-context-v3` ergänzt „Arbeitsflächen zusammenfassen“
+(standardmäßig 3 m; 0 schaltet diese Stufe aus). Sie verbindet nahe Feldteile
+und bezieht kleine kompakte helle Innenflecken als mögliche Bodenvariation ein.
+Langgezogene Wegkandidaten sowie Baum- und Gebäudekandidaten bleiben ausgespart.
+Ein größerer Radius verbindet stärker, kann aber echte Flächengrenzen überbrücken.
+Vorschläge deshalb prüfen. Details und Grenzen: [Erkennungspipeline](docs/detection.md).
+Nach Neustart das GeoTIFF frisch öffnen und eine neue Analyse starten;
+vorhandene Polygone werden beim Übernehmen weiterhin ausgespart.
+
+### Weniger zackige Konturen und Schattenprüfung
+
+„Flächenränder glätten“ schließt kleine Einbuchtungen und entfernt schmale
+Ausläufer an Feldrändern (standardmäßig 0,5 m Radius, maximal 2 m; 0 = aus).
+Der gewählte Radius wird direkt angewendet. Innenlöcher und andere ausgegebene
+Klassen bleiben ausgespart; kompakte kleine eigenständige Felder bleiben erhalten.
+Zum Vergleich eine neue Analyse starten: Bereits übernommene Konturen ändern
+sich dadurch nicht. Einzelheiten und Grenzen stehen in der Erkennungspipeline.
+
+Die separate Checkbox „Experimentell: mögliche Schatten in Arbeitsflächen
+einbeziehen“ vergleicht dunkle Stellen mit der Farbe benachbarter heller Vegetation.
+Sie ist zunächst ausgeschaltet: RGB-Bilder erlauben keine sichere Trennung von
+Schatten und Gehölzen. Ergebnisse mit dieser Option besonders prüfen.
+
+### Helle Innenbereiche statt künstlicher Feldtrennungen
+
+„Helle Innenbereiche räumlich prüfen und zusammenfassen“ bewertet helle Flecken
+und unterbrochene Streifen nach ihrer Lage in Arbeitsflächen. Größere durchgehende
+Wegzüge, direkte Anschlüsse, Maskenränder und Gebäudezufahrtskandidaten bleiben
+ausgespart. Neu zugeordnete Bereiche erscheinen in der Analysevorschau orange.
+Diese Stellen besonders prüfen: kleine echte Wege können ähnlich aussehen.
+Die Checkbox ist standardmäßig aktiv; Abschalten ermöglicht den Vergleich mit
+der bisherigen Regel. Regleränderungen erfordern einen neuen Analyselauf.
+Schattenbehandlung und manuell gezeichnete Objekte bleiben unverändert.
+
+### Strukturerkennung für Pflanzstreifen und Baumreihen
+
+Die neue standardmäßig aktive Checkbox „Regelmäßige Pflanzstreifen anhand
+Richtung und Abstand erkennen“ verbindet passende Reihenmuster auch über
+Farb-/Helligkeitsunterschiede und unklassifizierte Bodenbereiche hinweg.
+Die bestehende Obstflächen-Checkbox prüft weiterhin regelmäßige Baumabstände
+in mehreren Reihen. Beide liefern experimentelle Arbeitsflächenvorschläge,
+keine Befahrbarkeitsfreigabe. Neue Zuordnungen erscheinen in der Analyse orange.
+
+Vorbereitete Vergleichsprojekte (Radius 2 m, Schattenoption aus):
+`workspace/row_check/elies_rgb.project.json` und
+`workspace/row_check/rodia_rgb.project.json`. Daneben liegen PNG-Vergleiche.
+Besonders prüfen: zusammengehörige linke Streifenfläche auf Elies, tatsächliche
+Feldwege und Grenzen zwischen unterschiedlich bewirtschafteten Flächen auf Rodia.
+
+### Getrennte Strukturgruppen statt einer großen Arbeitsfläche
+
+„Arbeitsflächen nach Strukturgruppen getrennt halten“ trennt unterschiedliche
+Reihenmuster von Vegetation ohne sicheren Reihenbeleg und von Obstflächen.
+Kleine Flecken genügen nicht für eine neue Grenze. Gruppen werden unterschiedlich
+eingefärbt und behalten ihre Kennung beim Speichern. Grün steht für Vegetation
+ohne sicheren Reihenbeleg, Braun für Obstflächen, weitere Farben für Reihengruppen;
+alle gehören weiterhin zur Kategorie Arbeitsfläche. Gruppengrenzen sind Vorschläge.
+
+Vorbereitete Projekte: `workspace/group_check/elies_rgb.project.json` und
+`workspace/group_check/rodia_rgb.project.json`, jeweils mit PNG-Vergleich.
+Für eine neue Analyse das GeoTIFF frisch öffnen. Bereits übernommene Polygone
+haben weiterhin Vorrang vor neuen Vorschlägen. Bei Gruppentrennung zeigen die
+Farben die Gruppen; die orange Ergänzungsschicht wird dafür ausgeblendet.

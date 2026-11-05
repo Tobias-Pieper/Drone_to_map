@@ -5,11 +5,12 @@ import json
 from pathlib import Path
 from uuid import uuid4
 from shapely.geometry import Polygon, shape, mapping
-from nicegui import app, ui
+from nicegui import app, ui, run
 from .core import Project, CATEGORIES, TRAVERSABILITY, make_feature, project_geometry
 from .raster import open_project, preview, ensure_raster_summary
 from .safety import exclusion_zones
 from .editing import vertex_positions, move_vertex, edge_midpoints, insert_vertex
+from .detection import ColorBaseline, DetectionSettings, accept_proposals
 
 
 def main():
@@ -19,7 +20,8 @@ def main():
 
     @ui.page('/')
     def page():
-        state = {'project': None, 'layers': [], 'vertices': []}
+        state = {'project': None, 'layers': [], 'vertices': [],
+                 'proposals': None, 'proposal_layer': None, 'review_layer': None, 'group_layers': [], 'proposal_revision': None}
         vertex_event = 'farm-vertex-' + str(uuid4())
         selection_event = 'farm-selection-' + str(uuid4())
         insert_event = 'farm-insert-' + str(uuid4())
@@ -51,6 +53,35 @@ def main():
                      'polyline': False, 'circlemarker': False},
             'edit': {'edit': False, 'remove': False}}, hide_drawn_items=True).classes('w-full').style('height: 70vh; min-height: 500px')
         m.clear_layers()  # remove default online OpenStreetMap tiles
+        with ui.card().classes('w-full'):
+            ui.label('Automatische Polygonvorschläge · experimentell').classes('text-lg font-medium')
+            ui.label('RGB- und Strukturheuristik, noch kein KI-Modell. Alle Zuordnungen prüfen; '
+                     'es wird keine Befahrbarkeit bestätigt. Vorschau: türkis gestrichelt.')
+            with ui.row():
+                detection_size = ui.select([800, 1200, 1600, 2048], value=1600,
+                                           label='Längste Analyseseite (Pixel)')
+                detection_area = ui.number('Mindestfläche (m²)', value=4.0, min=0.1, step=1)
+                detection_gap = ui.number('Fragmente verbinden (m)', value=1.0, min=0, max=3, step=0.1)
+                detection_context = ui.number('Arbeitsflächen zusammenfassen (m; 0 = aus)', value=3.0, min=0, max=5, step=0.5)
+                detection_smoothing = ui.number('Flächenränder glätten (Radius in m; 0 = aus)', value=0.5, min=0, max=2, step=0.1)
+            ui.label('Nach Änderungen „Ganze Karte analysieren“ starten. Bereits übernommene Polygone bleiben unverändert.').classes('text-sm text-grey-7')
+            detection_shadows = ui.checkbox('Experimentell: mögliche Schatten in Arbeitsflächen einbeziehen', value=False)
+            detection_interiors = ui.checkbox('Helle Innenbereiche räumlich prüfen und zusammenfassen', value=True)
+            detection_rows = ui.checkbox('Regelmäßige Pflanzstreifen anhand Richtung und Abstand erkennen', value=True)
+            detection_groups = ui.checkbox('Arbeitsflächen nach Strukturgruppen getrennt halten', value=True)
+            ui.label('Strukturgruppen: Grün = ohne sicheren Reihenbeleg, Braun = Obstfläche; weitere Farben = getrennte Reihengruppen. Alle bleiben Arbeitsflächen.').classes('text-sm text-grey-7')
+            ui.label('Bei getrennten Strukturgruppen zeigen die Farben die Gruppen. Ohne Gruppentrennung markiert Orange neu einbezogene Bereiche.').classes('text-sm text-grey-7')
+            ui.label('Schattenoption: Dunkle Stellen können auch Gehölze sein. Ergebnisse besonders prüfen.').classes('text-sm text-grey-7')
+            detection_orchards = ui.checkbox('Regelmäßige Baumreihen als zusammenhängende Obstfläche erkennen', value=True)
+            with ui.row().classes('items-center'):
+                analyze_button = ui.button('Ganze Karte analysieren')
+                accept_button = ui.button('Vorschläge übernehmen', on_click=lambda: guard(accept_detection))
+                discard_button = ui.button('Vorschau verwerfen', on_click=lambda: guard(clear_detection))
+                detection_spinner = ui.spinner()
+            detection_spinner.set_visibility(False)
+            accept_button.disable()
+            discard_button.disable()
+            detection_status = ui.label('Noch keine Analyse gestartet.')
         selected = ui.select({}, label='Polygon').classes('w-full')
         edit_vertices = ui.switch('Stützpunkte auf der Karte verschieben', value=False,
                                   on_change=lambda: guard(render_vertices))
@@ -62,6 +93,7 @@ def main():
             subtype = ui.input('Unterkategorie', value='field')
             traversal = ui.select(list(TRAVERSABILITY), value='unknown', label='Befahrbarkeit')
         notes = ui.input('Bemerkung').classes('w-full')
+        review_hint = ui.label().classes('text-amber-800')
         coordinates = ui.textarea('Geometrie bearbeiten: GeoJSON in WGS84 (Länge, Breite)').classes('w-full')
         with ui.card().classes('w-full'):
             ui.label('Polygone und Bereiche').classes('text-lg font-medium')
@@ -116,6 +148,8 @@ def main():
                             name = props.get('name') or f'Polygon {index}'
                             text = (f"{name} · {props['subcategory']} · "
                                     f"{traversal_labels[props['traversability']]} · ID {feature['id'][:8]}")
+                            if props.get('review_flag'):
+                                text += ' · Prüfung erforderlich'
                             ui.button(text, color=color,
                                       on_click=partial(selected.set_value, feature['id'])).props(
                                           'flat no-caps align=left').classes('w-full').style(
@@ -123,13 +157,16 @@ def main():
 
         def refresh():
             p = project()
+            if state['proposals'] is not None and state['proposal_revision'] != p.revision:
+                clear_detection()
+                detection_status.set_text('Karte geändert: vorherige Analysevorschau verworfen.')
             for layer in state['layers']:
                 m.remove_layer(layer)
             state['layers'] = []
             colors = dict(work_area='green', navigable_area='orange', obstacle='red')
             for f in p.geojson()['features']:
                 layer = m.generic_layer(name='geoJSON', args=[f, {
-                    'style': {'color': colors[f['properties']['category']], 'dashArray': '5 5'}}])
+                    'style': {'color': (f['properties'].get('structure_color', 'green') if f['properties']['category'] == 'work_area' else colors[f['properties']['category']]), 'dashArray': '5 5'}}])
                 state['layers'].append(layer)
                 layer.run_method(':on', json.dumps('click'),
                                  f'e => emitEvent({json.dumps(selection_event)}, {json.dumps(f["id"])})')
@@ -146,13 +183,109 @@ def main():
                     safety_inputs[subcategory] = ui.number(
                         f'{subcategory} · Meter', value=p.safety_distances.get(subcategory, 0.0),
                         min=0, step=0.1, precision=2)
-            selected.set_options({f['id']: f"{f['properties']['subcategory']} · {f['id'][:8]}" for f in p.features})
+            selected.set_options({f['id']: f"{f['properties']['subcategory']} · {f['properties'].get('structure_group', '')} · {f['id'][:8]}" for f in p.features})
             render_polygon_list()
             render_vertices()
             status.set_text(f'{p.name} · {len(p.features)} Polygone · ' + ('freigegeben' if p.approved else 'Entwurf'))
 
+        def clear_detection():
+            for layer in state['group_layers']:
+                if layer in m.layers:
+                    m.remove_layer(layer)
+            state['group_layers'] = []
+            for key in ('proposal_layer', 'review_layer'):
+                layer = state[key]
+                if layer is not None and layer in m.layers:
+                    m.remove_layer(layer)
+            state.update(proposals=None, proposal_layer=None, review_layer=None, proposal_revision=None)
+            accept_button.disable()
+            discard_button.disable()
+            detection_status.set_text('Keine ausstehenden Vorschläge.')
+
+        async def analyze():
+            analyze_button.disable()
+            detection_spinner.set_visibility(True)
+            try:
+                p = project()
+                revision = p.revision
+                settings = DetectionSettings(max_dimension=int(detection_size.value),
+                                             minimum_area_m2=float(detection_area.value),
+                                             grouping_distance_m=float(detection_gap.value),
+                                             field_context_radius_m=float(detection_context.value),
+                                             outline_smoothing_m=float(detection_smoothing.value),
+                                             compensate_shadows=detection_shadows.value,
+                                             reconsider_bright_interiors=detection_interiors.value,
+                                             detect_rows=detection_rows.value,
+                                             separate_structure_groups=detection_groups.value,
+                                             detect_orchards=detection_orchards.value)
+                settings.validate()
+                clear_detection()
+                detection_status.set_text('Analyse läuft: Raster lesen, RGB-Regeln anwenden, Polygone erzeugen …')
+                result = await run.cpu_bound(ColorBaseline().detect, p.raster_path, p.raster['sha256'], settings)
+                if state['project'] is not p or p.revision != revision:
+                    raise ValueError('Projekt während der Analyse geändert. Bitte erneut analysieren.')
+                counts = {key: sum(f['properties']['category'] == key for f in result.features)
+                          for key in CATEGORIES}
+                detection_status.set_text(
+                    f"{len(result.features)} Vorschläge: {counts['work_area']} Arbeitsflächen, "
+                    f"{counts['navigable_area']} Wegkandidaten, {counts['obstacle']} Hinderniskandidaten. "
+                    f"Davon {result.metadata['orchard_candidate_count']} vermutete Obstflächen. "
+                    f"{result.metadata.get('reconsidered_bright_area_m2', 0):.1f} m² helle Innenbereiche neu zugeordnet. "
+                    f"{result.metadata.get('row_region_count', 0)} Bereiche mit Pflanzstreifen; "
+                    f"{result.metadata.get('row_added_area_m2', 0):.1f} m² dadurch ergänzt. "
+                    f"{result.metadata.get('structure_group_count', 0)} getrennte Strukturgruppen. "
+                    f"{result.metadata['omitted_by_limit']} weitere wegen Polygonlimit ausgelassen. "
+                    'Noch nicht im Projekt gespeichert. Bestehende Polygone haben beim Übernehmen Vorrang.')
+                if result.features:
+                    state.update(proposals=result, proposal_revision=revision)
+                    displayed = []
+                    for feature in result.features:
+                        displayed.append({**feature, 'geometry': mapping(project_geometry(
+                            shape(feature['geometry']), p.raster['crs'], 'EPSG:4326'))})
+                    state['proposal_layer'] = m.generic_layer(name='geoJSON', args=[
+                        {'type': 'FeatureCollection', 'features': [f for f in displayed if not f['properties'].get('structure_color')]},
+                        {'style': {'color': '#0891b2', 'fillOpacity': 0.12, 'dashArray': '6 6',
+                                   'weight': 2, 'interactive': False}}])
+                    for color in sorted({f['properties']['structure_color'] for f in displayed
+                                         if 'structure_color' in f['properties']}):
+                        group_features = [f for f in displayed if f['properties'].get('structure_color') == color]
+                        state['group_layers'].append(m.generic_layer(name='geoJSON', args=[
+                            {'type': 'FeatureCollection', 'features': group_features},
+                            {'style': {'color': color, 'fillColor': color, 'fillOpacity': 0.22,
+                                       'weight': 2, 'interactive': False}}]))
+                    if result.review_overlays and not settings.separate_structure_groups:
+                        overlays = [{**f, 'geometry': mapping(project_geometry(
+                            shape(f['geometry']), p.raster['crs'], 'EPSG:4326'))}
+                            for f in result.review_overlays]
+                        state['review_layer'] = m.generic_layer(name='geoJSON', args=[
+                            {'type': 'FeatureCollection', 'features': overlays},
+                            {'style': {'color': '#f97316', 'fillColor': '#f97316',
+                                       'fillOpacity': 0.5, 'weight': 2, 'interactive': False}}])
+                    accept_button.enable()
+                    discard_button.enable()
+            except Exception as exc:
+                detection_status.set_text(f'Analyse fehlgeschlagen: {exc}')
+                ui.notify(str(exc), type='negative')
+            finally:
+                analyze_button.enable()
+                detection_spinner.set_visibility(False)
+
+        analyze_button.on('click', analyze)
+
+        def accept_detection():
+            p = project()
+            result = state['proposals']
+            if result is None or p.revision != state['proposal_revision']:
+                raise ValueError('Keine aktuelle Vorschau vorhanden. Bitte erneut analysieren.')
+            count = accept_proposals(p, result)
+            clear_detection()
+            refresh()
+            detection_status.set_text(f'{count} Vorschläge ergänzt. Bitte prüfen und Projekt speichern. '
+                                      'Mit Undo lässt sich die Übernahme zurücknehmen.')
+
         def display():
             p = project()
+            clear_detection()
             target = workspace / f'{uuid4()}.png'
             bounds = preview(p, target)
             ensure_raster_summary(p)
@@ -197,6 +330,7 @@ def main():
                 props = f['properties']
                 category.value, subtype.value = props['category'], props['subcategory']
                 traversal.value, notes.value = props['traversability'], props.get('notes', '')
+                review_hint.set_text(props.get('review_reason', '') if props.get('review_flag') else '')
                 coordinates.value = json.dumps(mapping(project_geometry(shape(f['geometry']), p.raster['crs'], 'EPSG:4326')))
             render_vertices()
         selected.on_value_change(lambda e: guard(lambda: choose(e)))
